@@ -10,7 +10,7 @@ async function main() {
     config.GARMENT_WATCH_PATH,
     async (err, events) => {
       events.forEach(async (event) => {
-        const stat = await fs.lstatSync(event.path);
+        const stat = fs.lstatSync(event.path);
 
         if (stat.isFile()) {
           console.log("New file detected, ", event.path);
