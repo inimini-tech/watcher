@@ -9,37 +9,31 @@ async function main() {
   const subscription = await watcher.subscribe(
     config.GARMENT_WATCH_PATH,
     async (err, events) => {
-      console.log(events);
+      events.map(async (event) => {
+        const stat = await fs.lstatSync(event.path);
 
-      await Promise.all(
-        events.map(async (event) => {
-          if (event.type === "create") {
-            const stat = await fs.lstatSync(event.path);
+        if (stat.isFile()) {
+          console.log("New file detected, ", event.path);
 
-            if (stat.isFile()) {
-              console.log("New file created, ", event.path);
+          exec(
+            `open -a ${config.GARMENT_FILTER_APP.replace(/(\s+)/g, "\\$1")} ${event.path.replace(/(\s+)/g, "\\$1")}`,
+            (error, stdout, stderr) => {
+              if (error) {
+                console.log(`error: ${error.message}`);
+                return;
+              }
+              if (stderr) {
+                console.log(`stderr: ${stderr}`);
+                return;
+              }
+              console.log(`stdout: ${stdout}`);
+            },
+          );
 
-              exec(
-                `open -a ${config.GARMENT_FILTER_APP.replace(/(\s+)/g, "\\$1")} ${event.path.replace(/(\s+)/g, "\\$1")}`,
-                (error, stdout, stderr) => {
-                  if (error) {
-                    console.log(`error: ${error.message}`);
-                    return;
-                  }
-                  if (stderr) {
-                    console.log(`stderr: ${stderr}`);
-                    return;
-                  }
-                  console.log(`stdout: ${stdout}`);
-                },
-              );
-
-              //const newPath = `${config.GARMENT_OUT_PATH}/${path.posix.basename(event.path)}`;
-              //fs.renameSync(event.path, newPath);
-            }
-          }
-        }),
-      );
+          //const newPath = `${config.GARMENT_OUT_PATH}/${path.posix.basename(event.path)}`;
+          //fs.renameSync(event.path, newPath);
+        }
+      });
     },
   );
 }
