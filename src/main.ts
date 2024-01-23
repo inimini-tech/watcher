@@ -19,7 +19,14 @@ async function main() {
             `open -a ${config.GARMENT_FILTER_APP.replace(/(\s+)/g, "\\$1")} ${event.path.replace(/(\s+)/g, "\\$1")}`,
           );
 
-          console.log(result);
+          const outputPath =
+            `/Users/inimini/Dropbox/MINIKIT PHOTO/NYA PLAGG/_PNG/${path.posix.basename(event.path)}`.replace(
+              /(\s+)/g,
+              "\\$1",
+            );
+
+          console.log("Waiting for file to be created:", outputPath);
+          await checkFileExist(outputPath);
 
           //const newPath = `${config.GARMENT_OUT_PATH}/${path.posix.basename(event.path)}`;
           //fs.renameSync(event.path, newPath);
@@ -27,6 +34,25 @@ async function main() {
       });
     },
   );
+}
+
+async function checkFileExist(path: string, timeout = 2000) {
+  let totalTime = 0;
+  let checkTime = timeout / 10;
+
+  return await new Promise((resolve, reject) => {
+    const timer = setInterval(function () {
+      totalTime += checkTime;
+
+      let fileExists = fs.existsSync(path);
+
+      if (fileExists || totalTime >= timeout) {
+        clearInterval(timer);
+
+        resolve(fileExists);
+      }
+    }, checkTime);
+  });
 }
 
 main();
