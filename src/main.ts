@@ -9,7 +9,7 @@ async function main() {
   const subscription = await watcher.subscribe(
     config.GARMENT_WATCH_PATH,
     async (err, events) => {
-      events.map(async (event) => {
+      events.forEach(async (event) => {
         const stat = await fs.lstatSync(event.path);
 
         if (stat.isFile()) {
