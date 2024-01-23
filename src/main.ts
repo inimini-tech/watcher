@@ -20,7 +20,7 @@ async function main() {
               console.log("New file created, ", event.path);
 
               exec(
-                `${config.GARMENT_FILTER_APP} ${event.path}`,
+                `${config.GARMENT_FILTER_APP.replace(/(\s+)/g, "\\$1")} ${event.path.replace(/(\s+)/g, "\\$1")}`,
                 (error, stdout, stderr) => {
                   if (error) {
                     console.log(`error: ${error.message}`);
