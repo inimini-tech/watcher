@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "build": "tsup --dts",
+    "build": "tsup src/main.ts --dts",
     "run": "pm2 start dist/main.js",
     "dev": "tsup src/main.ts --watch "
   },
