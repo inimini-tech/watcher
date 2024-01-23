@@ -2,6 +2,7 @@ import { config } from "./config";
 import watcher from "@parcel/watcher";
 import fs from "node:fs";
 import path from "path";
+import { exec } from "child_process";
 
 async function main() {
   console.log("Starting watcher");
@@ -16,8 +17,25 @@ async function main() {
             const stat = await fs.lstatSync(event.path);
 
             if (stat.isFile()) {
-              const newPath = `${config.GARMENT_OUT_PATH}/${path.posix.basename(event.path)}`;
-              fs.renameSync(event.path, newPath);
+              console.log("New file created, ", event.path);
+
+              exec(
+                `${config.GARMENT_FILTER_APP} ${event.path}`,
+                (error, stdout, stderr) => {
+                  if (error) {
+                    console.log(`error: ${error.message}`);
+                    return;
+                  }
+                  if (stderr) {
+                    console.log(`stderr: ${stderr}`);
+                    return;
+                  }
+                  console.log(`stdout: ${stdout}`);
+                },
+              );
+
+              //const newPath = `${config.GARMENT_OUT_PATH}/${path.posix.basename(event.path)}`;
+              //fs.renameSync(event.path, newPath);
             }
           }
         }),
