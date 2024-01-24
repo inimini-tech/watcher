@@ -9,7 +9,7 @@ async function main() {
   const subscription = await watcher.subscribe(
     config.GARMENT_WATCH_PATH,
     async (err, events) => {
-      console.log("new event detected", event);
+      console.log("new event detected", events);
       events.forEach(async (event) => {
         const stat = fs.lstatSync(event.path);
 
