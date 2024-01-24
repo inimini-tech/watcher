@@ -10,7 +10,9 @@ async function main() {
     config.GARMENT_WATCH_PATH,
     async (err, events) => {
       console.log("new event detected", events);
-      events.forEach(async (event) => {
+
+      for (let i = 0; i < events.length; i++) {
+        const event = events[i];
         const stat = fs.lstatSync(event.path);
 
         if (stat.isFile()) {
@@ -33,7 +35,7 @@ async function main() {
           //const newPath = `${config.GARMENT_OUT_PATH}/${path.posix.basename(event.path)}`;
           //fs.renameSync(event.path, newPath);
         }
-      });
+      }
     },
   );
 }
