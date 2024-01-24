@@ -30,10 +30,9 @@ async function main() {
 
           console.log("Waiting for file to be created:", outputPath);
           await checkFileExist(outputPath);
-          console.log("W");
 
-          //const newPath = `${config.GARMENT_OUT_PATH}/${path.posix.basename(event.path)}`;
-          //fs.renameSync(event.path, newPath);
+          const newPath = `${config.GARMENT_OUT_PATH}/${path.posix.basename(event.path)}`;
+          fs.renameSync(event.path, newPath);
         }
       }
     },
