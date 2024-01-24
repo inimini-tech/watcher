@@ -26,6 +26,8 @@ async function main() {
               `open -a ${config.GARMENT_FILTER_APP.replace(/(\s+)/g, "\\$1")} ${event.path.replace(/(\s+)/g, "\\$1")}`,
             );
 
+            await sleep(1000);
+
             const outputPath =
               `/Users/inimini/Dropbox/MINIKIT PHOTO/NYA PLAGG/_PNG/${path.posix.basename(event.path)}`.replace(
                 /(\s+)/g,
@@ -59,6 +61,11 @@ async function main() {
         }
       }
     }
+  });
+}
+async function sleep(ms: number) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
   });
 }
 
