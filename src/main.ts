@@ -9,6 +9,7 @@ async function main() {
   const subscription = await watcher.subscribe(
     config.GARMENT_WATCH_PATH,
     async (err, events) => {
+      console.log("new event detected", event);
       events.forEach(async (event) => {
         const stat = fs.lstatSync(event.path);
 
@@ -27,6 +28,7 @@ async function main() {
 
           console.log("Waiting for file to be created:", outputPath);
           await checkFileExist(outputPath);
+          console.log("W");
 
           //const newPath = `${config.GARMENT_OUT_PATH}/${path.posix.basename(event.path)}`;
           //fs.renameSync(event.path, newPath);
