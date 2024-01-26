@@ -4,8 +4,6 @@ import fs from "node:fs";
 import path from "path";
 import { execSync } from "child_process";
 
-let dropletProcessRunning = false;
-
 async function main() {
   console.log("Starting watcher");
 
@@ -22,20 +20,11 @@ async function main() {
           if (stat.isFile()) {
             console.log("New file detected, ", event.path);
 
-            const result = execSync(
+            execSync(
               `open -a ${config.GARMENT_FILTER_APP.replace(/(\s+)/g, "\\$1")} ${event.path.replace(/(\s+)/g, "\\$1")}`,
             );
 
             await sleep(1000);
-
-            const outputPath =
-              `/Users/inimini/Dropbox/MINIKIT PHOTO/NYA PLAGG/_PNG/${path.posix.basename(event.path)}`.replace(
-                /(\s+)/g,
-                "\\$1",
-              );
-
-            //console.log("Waiting for file to be created:", outputPath);
-            //await checkFileExist(outputPath);
           }
         }
       }
@@ -57,7 +46,7 @@ async function main() {
         const stat = fs.lstatSync(oldPath);
         if (stat.isFile()) {
           console.log("Moving ", oldPath, " to ", newPath);
-          //fs.renameSync(oldPath, newPath);
+          fs.renameSync(oldPath, newPath);
         }
       }
     }
