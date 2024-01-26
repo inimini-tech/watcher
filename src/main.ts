@@ -14,9 +14,9 @@ async function main() {
 
       for (let i = 0; i < events.length; i++) {
         const event = events[i];
-        const stat = fs.lstatSync(event.path);
 
         if (event.type === "create" || event.type === "update") {
+          const stat = fs.lstatSync(event.path);
           if (stat.isFile()) {
             console.log("New file detected, ", event.path);
 
