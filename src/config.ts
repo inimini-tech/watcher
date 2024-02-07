@@ -6,4 +6,6 @@ export const config = {
     "/Users/inimini/Dropbox/MINIKIT PHOTO/INIMINI EP/_enstakaplagg_macPro.app",
   GARMENT_OUT_PATH:
     "/Users/inimini/Dropbox/MINIKIT PHOTO/INIMINI EP/_OREDIGERADE",
+  GARMENT_COMPLETED_OUT_PATH:
+    "/Users/inimini/Dropbox/MINIKIT PHOTO/INIMINI EP/_UPPLADDADE",
 };
