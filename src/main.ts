@@ -6,6 +6,8 @@ import path from "path";
 import { execSync } from "child_process";
 import { Storage } from "@google-cloud/storage";
 
+let ps = false;
+
 const storage = new Storage({
   projectId: process.env.PROJECT_ID,
   credentials: require("../key.json"),
@@ -23,12 +25,12 @@ async function main() {
         if (event.type === "create" || event.type === "update") {
           await checkFileSize(event.path, async () => {
             console.log(`File ${event.path} has been synced.`);
-
-            execSync(
-              `open -a ${config.GARMENT_FILTER_APP.replace(/(\s+)/g, "\\$1")} ${event.path.replace(/(\s+)/g, "\\$1")}`,
-            );
-
-            await sleep(1000);
+            await checkPS(async () => {
+              ps = true;
+              execSync(
+                `open -a ${config.GARMENT_FILTER_APP.replace(/(\s+)/g, "\\$1")} ${event.path.replace(/(\s+)/g, "\\$1")}`,
+              );
+            });
           });
         }
       }
@@ -40,6 +42,8 @@ async function main() {
       const event = events[i];
 
       if (event.type === "create") {
+        ps = false;
+
         await checkFileSize(event.path, async () => {
           console.log(`File ${event.path} has been synced.`);
 
@@ -76,6 +80,17 @@ async function sleep(ms: number) {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+async function checkPS(callback: () => void, interval: number = 5000) {
+  const psTimer = setInterval(async () => {
+    if (!ps) {
+      clearInterval(psTimer);
+      callback();
+    } else {
+      console.log(`PS is busy`);
+    }
+  }, interval);
 }
 
 async function checkFileSize(
