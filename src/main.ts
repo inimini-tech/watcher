@@ -43,32 +43,32 @@ async function main() {
       if (event.type === "create") {
         await checkFileSize(event.path, async () => {
           console.log(`File ${event.path} has been synced.`);
-        });
 
-        const id = path.parse(path.posix.basename(event.path)).name;
-        const filename = path.posix
-          .basename(event.path)
-          .replace(".png", ".jpg");
+          const id = path.parse(path.posix.basename(event.path)).name;
+          const filename = path.posix
+            .basename(event.path)
+            .replace(".png", ".jpg");
 
-        const oldPath = path.join(config.GARMENT_WATCH_PATH, filename);
-        const newPath = path.join(config.GARMENT_OUT_PATH, filename);
+          const oldPath = path.join(config.GARMENT_WATCH_PATH, filename);
+          const newPath = path.join(config.GARMENT_OUT_PATH, filename);
 
-        if (fs.existsSync(oldPath)) {
-          try {
-            console.log(`Moving [${id}]`, oldPath, " to ", newPath);
-            fs.renameSync(oldPath, newPath);
-          } catch (err: any) {
-            console.log(err.message);
-            console.log("Error while moving file");
+          if (fs.existsSync(oldPath)) {
+            try {
+              console.log(`Moving [${id}]`, oldPath, " to ", newPath);
+              fs.renameSync(oldPath, newPath);
+            } catch (err: any) {
+              console.log(err.message);
+              console.log("Error while moving file");
+            }
           }
-        }
 
-        try {
-          await uploadFileToBucket(event.path);
-          await fetch(`${process.env.API_URL}/api/processed?id=${id}`);
-        } catch (err) {
-          console.log("Error when uploading to bucket");
-        }
+          try {
+            await uploadFileToBucket(event.path);
+            await fetch(`${process.env.API_URL}/api/processed?id=${id}`);
+          } catch (err) {
+            console.log("Error when uploading to bucket");
+          }
+        });
       }
     }
   });
