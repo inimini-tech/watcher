@@ -21,16 +21,15 @@ async function main() {
         const event = events[i];
 
         if (event.type === "create" || event.type === "update") {
-          const stat = fs.lstatSync(event.path);
-          if (stat.isFile()) {
-            console.log("New file detected, ", event.path);
+          await checkFileSize(event.path, async () => {
+            console.log(`File ${event.path} has been synced.`);
 
             execSync(
               `open -a ${config.GARMENT_FILTER_APP.replace(/(\s+)/g, "\\$1")} ${event.path.replace(/(\s+)/g, "\\$1")}`,
             );
 
             await sleep(1000);
-          }
+          });
         }
       }
     },
