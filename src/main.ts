@@ -51,20 +51,21 @@ async function main() {
         const oldPath = path.join(config.GARMENT_WATCH_PATH, filename);
         const newPath = path.join(config.GARMENT_OUT_PATH, filename);
 
-        console.log(id);
-
-        const stat = fs.lstatSync(oldPath);
-        if (stat.isFile()) {
+        if (fs.existsSync(oldPath)) {
           try {
             console.log(`Moving [${id}]`, oldPath, " to ", newPath);
             fs.renameSync(oldPath, newPath);
-
-            await uploadFileToBucket(event.path);
-            await fetch(`${process.env.API_URL}/api/processed?id=${id}`);
           } catch (err: any) {
             console.log(err.message);
             console.log("Error while moving file");
           }
+        }
+
+        try {
+          await uploadFileToBucket(event.path);
+          await fetch(`${process.env.API_URL}/api/processed?id=${id}`);
+        } catch (err) {
+          console.log("Error when uploading to bucket");
         }
       }
     }
