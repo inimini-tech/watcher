@@ -54,7 +54,7 @@ async function main() {
             .basename(event.path)
             .replace(".png", ".jpg");
 
-          const oldPath = path.join(config.GARMENT_WATCH_PATH, filename);
+          const oldPath = path.join(config.GARMENT_PS_PROCESS_PATH, filename);
           const newPath = path.join(config.GARMENT_OUT_PATH, filename);
 
           if (fs.existsSync(oldPath)) {
@@ -94,7 +94,7 @@ function checkFolder() {
       const fullPathString = files
         .map(
           (filePath) =>
-            `"${path.join(config.GARMENT_PS_PROCESS_PATH, filePath)}"`,
+            `"${path.join(config.GARMENT_PS_PROCESS_PATH, path.basename(filePath))}"`,
         )
         .join(" ");
 
