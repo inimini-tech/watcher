@@ -108,14 +108,15 @@ async function uploadFileToBucket(filepath: string) {
       },
     });
 
+    console.log(result);
     console.log(`File uploaded`);
 
     const filename = path.posix.basename(filepath);
     const newPath = path.join(config.GARMENT_COMPLETED_OUT_PATH, filename);
 
-    fs.renameSync(filepath, newPath);
+    //fs.renameSync(filepath, newPath);
   } catch (error: any) {
-    console.log(error);
+    console.log(error.message);
     throw new Error(error.message);
   }
 }
