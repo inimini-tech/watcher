@@ -76,54 +76,48 @@ async function sleep(ms: number) {
   });
 }
 
-async function uploadFileToBucket(filePath: string) {
-  const bucketName = "minikit-images-garments";
-  const destinationFileName = path.posix.basename(filePath);
-  const fileExtension = filePath.split(".").pop(); // Extract file extension
-  let contentType = "";
+async function uploadFileToBucket(filepath: string) {
+  try {
+    const fileName = path.posix.basename(filepath);
+    const gcs = storage.bucket("gs://minikit-images-garments");
+    const storagepath = `${fileName}`;
 
-  switch (fileExtension) {
-    case "jpg":
-    case "jpeg":
-      contentType = "image/jpeg";
-      break;
-    case "png":
-      contentType = "image/png";
-      break;
-    case "gif":
-      contentType = "image/gif";
-      break;
-    default:
-      contentType = "application/octet-stream";
+    let contentType = "";
+    const fileExtension = filepath.split(".").pop();
+
+    switch (fileExtension) {
+      case "jpg":
+      case "jpeg":
+        contentType = "image/jpeg";
+        break;
+      case "png":
+        contentType = "image/png";
+        break;
+      case "gif":
+        contentType = "image/gif";
+        break;
+      default:
+        contentType = "application/octet-stream";
+    }
+
+    const result = await gcs.upload(filepath, {
+      destination: storagepath,
+      public: true,
+      metadata: {
+        contentType: "application/plain",
+      },
+    });
+
+    console.log(`File uploaded`);
+
+    const filename = path.posix.basename(filepath);
+    const newPath = path.join(config.GARMENT_COMPLETED_OUT_PATH, filename);
+
+    fs.renameSync(filepath, newPath);
+  } catch (error: any) {
+    console.log(error);
+    throw new Error(error.message);
   }
-
-  console.log(bucketName, filePath, destinationFileName, fileExtension);
-
-  const fileContent = fs.createReadStream(filePath);
-  const file = storage.bucket(bucketName).file(destinationFileName);
-  const stream = file.createWriteStream({
-    metadata: {
-      contentType: contentType,
-    },
-  });
-
-  return new Promise<void>((resolve, reject) => {
-    stream.on("error", (err) => {
-      console.log(err.message);
-      reject(err);
-    });
-
-    stream.on("finish", () => {
-      console.log(`File uploaded to ${bucketName}/${destinationFileName}`);
-
-      const filename = path.posix.basename(filePath);
-      const newPath = path.join(config.GARMENT_COMPLETED_OUT_PATH, filename);
-
-      fs.renameSync(filePath, newPath);
-      resolve();
-    });
-    fileContent.pipe(stream);
-  });
 }
 
 async function checkFileExist(path: string, timeout = 2000) {
