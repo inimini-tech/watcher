@@ -103,9 +103,8 @@ async function uploadFileToBucket(filepath: string) {
 
     const result = await gcs.upload(filepath, {
       destination: storagepath,
-      public: true,
       metadata: {
-        contentType: "application/plain",
+        contentType,
       },
     });
 
