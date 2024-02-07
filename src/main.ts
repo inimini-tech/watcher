@@ -74,7 +74,7 @@ async function sleep(ms: number) {
 }
 
 async function uploadFileToBucket(filePath: string) {
-  const bucketName = "bucket-upload-garments";
+  const bucketName = "minikit-images-garments";
   const destinationFileName = path.posix.basename(filePath);
   const fileExtension = filePath.split(".").pop(); // Extract file extension
   let contentType = "";
