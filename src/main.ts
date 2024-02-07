@@ -41,6 +41,10 @@ async function main() {
       const event = events[i];
 
       if (event.type === "create") {
+        await checkFileSize(event.path, async () => {
+          console.log(`File ${event.path} has been synced.`);
+        });
+
         const id = path.parse(path.posix.basename(event.path)).name;
         const filename = path.posix
           .basename(event.path)
@@ -75,13 +79,30 @@ async function sleep(ms: number) {
   });
 }
 
+async function checkFileSize(
+  filePath: string,
+  callback: () => void,
+  interval: number = 5000,
+) {
+  const fileSizeTimer = setInterval(async () => {
+    const stats = fs.statSync(filePath);
+    if (stats.size > 0) {
+      clearInterval(fileSizeTimer);
+      callback();
+    } else {
+      console.log(`File ${filePath} is not synced by Dropbox yet...`);
+    }
+  }, interval);
+}
+
 async function uploadFileToBucket(filepath: string) {
   try {
-    console.log(filepath);
     const stats = fs.statSync(filepath);
     const fileSizeInBytes = stats.size;
 
-    console.log(`Uploading ${filepath} (${fileSizeInBytes / 1024}kb)`);
+    console.log(
+      `Uploading ${filepath} (${Math.round(fileSizeInBytes / 1024)}kb)`,
+    );
 
     const fileName = path.posix.basename(filepath);
     const gcs = storage.bucket("gs://minikit-images-garments");
