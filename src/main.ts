@@ -58,7 +58,8 @@ async function main() {
             console.log(`Moving [${id}]`, oldPath, " to ", newPath);
             fs.renameSync(oldPath, newPath);
             await fetch(`${process.env.API_URL}/api/processed?id=${id}`);
-          } catch (err) {
+          } catch (err: any) {
+            console.log(err.message);
             console.log("Error while moving file");
           }
         }
