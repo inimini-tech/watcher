@@ -99,7 +99,7 @@ async function uploadFileToBucket(filePath: string) {
 
   console.log(bucketName, filePath, destinationFileName, fileExtension);
 
-  const fileContent = fs.readFileSync(filePath);
+  const fileContent = fs.createReadStream(filePath);
   const file = storage.bucket(bucketName).file(destinationFileName);
   const stream = file.createWriteStream({
     metadata: {
@@ -122,7 +122,7 @@ async function uploadFileToBucket(filePath: string) {
       fs.renameSync(filePath, newPath);
       resolve();
     });
-    stream.end(fileContent);
+    fileContent.pipe(stream);
   });
 }
 
