@@ -8,7 +8,7 @@ import { Storage } from "@google-cloud/storage";
 
 const storage = new Storage({
   projectId: process.env.PROJECT_ID,
-  credentials: require("./key.json"),
+  credentials: require("../key.json"),
 });
 
 async function main() {
