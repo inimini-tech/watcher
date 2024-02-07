@@ -94,6 +94,8 @@ async function uploadFileToBucket(filePath: string) {
       contentType = "application/octet-stream";
   }
 
+  console.log(bucketName, filePath, destinationFileName, fileExtension);
+
   const fileContent = fs.readFileSync(filePath);
   const file = storage.bucket(bucketName).file(destinationFileName);
   const stream = file.createWriteStream({
@@ -104,6 +106,7 @@ async function uploadFileToBucket(filePath: string) {
 
   return new Promise<void>((resolve, reject) => {
     stream.on("error", (err) => {
+      console.log(err.message);
       reject(err);
     });
 
