@@ -17,8 +17,6 @@ async function main() {
   const subscription = await watcher.subscribe(
     config.GARMENT_WATCH_PATH,
     async (err, events) => {
-      console.log("new event detected", events);
-
       for (let i = 0; i < events.length; i++) {
         const event = events[i];
 
@@ -83,7 +81,7 @@ async function uploadFileToBucket(filepath: string) {
     const stats = fs.statSync(filepath);
     const fileSizeInBytes = stats.size;
 
-    console.log(fileSizeInBytes);
+    console.log(`Uploading ${filepath} (${fileSizeInBytes / 1024}kb)`);
 
     const fileName = path.posix.basename(filepath);
     const gcs = storage.bucket("gs://minikit-images-garments");
@@ -114,13 +112,12 @@ async function uploadFileToBucket(filepath: string) {
       },
     });
 
-    console.log(result);
-    console.log(`File uploaded`);
-
     const filename = path.posix.basename(filepath);
     const newPath = path.join(config.GARMENT_COMPLETED_OUT_PATH, filename);
 
-    //fs.renameSync(filepath, newPath);
+    fs.renameSync(filepath, newPath);
+
+    console.log(`Upload for ${filepath} completed`);
   } catch (error: any) {
     console.log(error.message);
     throw new Error(error.message);
