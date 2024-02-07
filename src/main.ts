@@ -81,6 +81,10 @@ async function main() {
 
 function checkFolder() {
   setInterval(() => {
+    if (countJpegFiles(config.GARMENT_PS_PROCESS_PATH) > 0) {
+      return;
+    }
+
     const files = getNonEmptyFiles(config.GARMENT_WATCH_PATH);
     if (files.length > 0) {
       console.log(`${files.length} files to be processed`);
@@ -108,6 +112,24 @@ function checkFolder() {
       );
     }
   }, 10000);
+}
+
+function countJpegFiles(folderPath: string): number {
+  let jpegCount = 0;
+
+  const filenames = fs.readdirSync(folderPath);
+  filenames.forEach((filename) => {
+    const filePath = path.join(folderPath, filename);
+    const stats = fs.statSync(filePath);
+    if (stats.isFile()) {
+      const extension = path.extname(filePath).toLowerCase();
+      if (extension === ".jpg" || extension === ".jpeg") {
+        jpegCount++;
+      }
+    }
+  });
+
+  return jpegCount;
 }
 
 function getNonEmptyFiles(folderPath: string): string[] {
