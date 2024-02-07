@@ -12,7 +12,9 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@parcel/watcher": "^2.4.0"
+    "@google-cloud/storage": "^7.7.0",
+    "@parcel/watcher": "^2.4.0",
+    "dotenv": "^16.4.1"
   },
   "devDependencies": {
     "@types/node": "^20.11.5",

@@ -1,8 +1,15 @@
+import "dotenv/config";
 import { config } from "./config";
 import watcher from "@parcel/watcher";
 import fs from "node:fs";
 import path from "path";
 import { execSync } from "child_process";
+import { Storage } from "@google-cloud/storage";
+
+const storage = new Storage({
+  projectId: process.env.PROJECT_ID,
+  credentials: require("./key.json"),
+});
 
 async function main() {
   console.log("Starting watcher");
@@ -36,6 +43,7 @@ async function main() {
       const event = events[i];
 
       if (event.type === "create") {
+        const id = path.parse(path.posix.basename(event.path)).name;
         const filename = path.posix
           .basename(event.path)
           .replace(".png", ".jpg");
@@ -45,8 +53,14 @@ async function main() {
 
         const stat = fs.lstatSync(oldPath);
         if (stat.isFile()) {
-          console.log("Moving ", oldPath, " to ", newPath);
-          fs.renameSync(oldPath, newPath);
+          try {
+            await uploadFileToBucket(oldPath);
+            console.log(`Moving [${id}]`, oldPath, " to ", newPath);
+            fs.renameSync(oldPath, newPath);
+            await fetch(`${process.env.API_URL}/api/processed?id=${id}`);
+          } catch (err) {
+            console.log("Error while moving file");
+          }
         }
       }
     }
@@ -55,6 +69,48 @@ async function main() {
 async function sleep(ms: number) {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
+  });
+}
+
+async function uploadFileToBucket(filePath: string) {
+  const bucketName = "bucket-upload-garments";
+  const destinationFileName = path.posix.basename(filePath);
+  const fileExtension = filePath.split(".").pop(); // Extract file extension
+  let contentType = "";
+
+  switch (fileExtension) {
+    case "jpg":
+    case "jpeg":
+      contentType = "image/jpeg";
+      break;
+    case "png":
+      contentType = "image/png";
+      break;
+    case "gif":
+      contentType = "image/gif";
+      break;
+    default:
+      contentType = "application/octet-stream";
+  }
+
+  const fileContent = fs.readFileSync(filePath);
+  const file = storage.bucket(bucketName).file(destinationFileName);
+  const stream = file.createWriteStream({
+    metadata: {
+      contentType: contentType,
+    },
+  });
+
+  return new Promise<void>((resolve, reject) => {
+    stream.on("error", (err) => {
+      reject(err);
+    });
+
+    stream.on("finish", () => {
+      console.log(`File uploaded to ${bucketName}/${destinationFileName}`);
+      resolve();
+    });
+    stream.end(fileContent);
   });
 }
 
