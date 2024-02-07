@@ -79,6 +79,12 @@ async function sleep(ms: number) {
 
 async function uploadFileToBucket(filepath: string) {
   try {
+    console.log(filepath);
+    const stats = fs.statSync(filepath);
+    const fileSizeInBytes = stats.size;
+
+    console.log(fileSizeInBytes);
+
     const fileName = path.posix.basename(filepath);
     const gcs = storage.bucket("gs://minikit-images-garments");
     const storagepath = `${fileName}`;
