@@ -15,7 +15,8 @@ const storage = new Storage({
 
 async function main() {
   console.log("Starting watcher");
-
+  checkFolder();
+  /*
   const subscription = await watcher.subscribe(
     config.GARMENT_WATCH_PATH,
     async (err, events) => {
@@ -36,6 +37,7 @@ async function main() {
       }
     },
   );
+   */
 
   await watcher.subscribe(config.GARMENT_PS_WATCH_PATH, async (err, events) => {
     for (let i = 0; i < events.length; i++) {
@@ -76,21 +78,46 @@ async function main() {
     }
   });
 }
-async function sleep(ms: number) {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
+
+function checkFolder() {
+  setInterval(() => {
+    const files = getNonEmptyFiles(config.GARMENT_WATCH_PATH);
+    if (files.length > 0) {
+      console.log(`${files.length} files to be processed`);
+      files.forEach((filePath: string) => {
+        const filename = path.basename(filePath);
+        const newPath = path.join(config.GARMENT_PS_PROCESS_PATH, filename);
+        fs.renameSync(filePath, newPath);
+        console.log(`Moved ${filePath} to ${newPath}`);
+      });
+
+      const fullPathString = files
+        .map(
+          (filePath) =>
+            `"${path.join(config.GARMENT_PS_PROCESS_PATH, filePath)}"`,
+        )
+        .join(" ");
+
+      execSync(
+        `open -a ${config.GARMENT_FILTER_APP.replace(/(\s+)/g, "\\$1")} ${fullPathString}`,
+      );
+    }
+  }, 10000);
 }
 
-async function checkPS(callback: () => void, interval: number = 5000) {
-  const psTimer = setInterval(async () => {
-    if (!ps) {
-      clearInterval(psTimer);
-      callback();
-    } else {
-      console.log(`PS is busy`);
+function getNonEmptyFiles(folderPath: string): string[] {
+  const files: string[] = [];
+  const filenames = fs.readdirSync(folderPath);
+
+  filenames.forEach((filename) => {
+    const filePath = path.join(folderPath, filename);
+    const stats = fs.statSync(filePath);
+    if (stats.size > 0 && stats.isFile()) {
+      files.push(filePath);
     }
-  }, interval);
+  });
+
+  return files;
 }
 
 async function checkFileSize(
@@ -157,25 +184,6 @@ async function uploadFileToBucket(filepath: string) {
     console.log(error.message);
     throw new Error(error.message);
   }
-}
-
-async function checkFileExist(path: string, timeout = 2000) {
-  let totalTime = 0;
-  let checkTime = timeout / 10;
-
-  return await new Promise((resolve, reject) => {
-    const timer = setInterval(function () {
-      totalTime += checkTime;
-
-      let fileExists = fs.existsSync(path);
-
-      if (fileExists || totalTime >= timeout) {
-        clearInterval(timer);
-
-        resolve(fileExists);
-      }
-    }, checkTime);
-  });
 }
 
 main();
