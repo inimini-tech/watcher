@@ -98,6 +98,11 @@ function checkFolder() {
         )
         .join(" ");
 
+      console.log(fullPathString);
+      console.log(
+        `open -a ${config.GARMENT_FILTER_APP.replace(/(\s+)/g, "\\$1")} ${fullPathString}`,
+      );
+
       execSync(
         `open -a ${config.GARMENT_FILTER_APP.replace(/(\s+)/g, "\\$1")} ${fullPathString}`,
       );
@@ -113,7 +118,10 @@ function getNonEmptyFiles(folderPath: string): string[] {
     const filePath = path.join(folderPath, filename);
     const stats = fs.statSync(filePath);
     if (stats.size > 0 && stats.isFile()) {
-      files.push(filePath);
+      const extension = path.extname(filePath).toLowerCase();
+      if (extension === ".jpg" || extension === ".jpeg") {
+        files.push(filePath);
+      }
     }
   });
 
