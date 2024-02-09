@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "path";
 import { execSync } from "child_process";
 import { Storage } from "@google-cloud/storage";
+import { shortPath, log } from "./logging";
 
 let ps = false;
 
@@ -14,30 +15,8 @@ const storage = new Storage({
 });
 
 async function main() {
-  console.log("Starting watcher");
+  log("Starting watcher", "NOTICE");
   checkFolder();
-  /*
-  const subscription = await watcher.subscribe(
-    config.GARMENT_WATCH_PATH,
-    async (err, events) => {
-      for (let i = 0; i < events.length; i++) {
-        const event = events[i];
-
-        if (event.type === "create" || event.type === "update") {
-          await checkFileSize(event.path, async () => {
-            console.log(`File ${event.path} has been synced.`);
-            await checkPS(async () => {
-              ps = true;
-              execSync(
-                `open -a ${config.GARMENT_FILTER_APP.replace(/(\s+)/g, "\\$1")} ${event.path.replace(/(\s+)/g, "\\$1")}`,
-              );
-            });
-          });
-        }
-      }
-    },
-  );
-   */
 
   await watcher.subscribe(config.GARMENT_PS_WATCH_PATH, async (err, events) => {
     for (let i = 0; i < events.length; i++) {
@@ -47,7 +26,7 @@ async function main() {
         ps = false;
 
         await checkFileSize(event.path, async () => {
-          console.log(`File ${event.path} has been synced.`);
+          log(`File ${shortPath(event.path)} has been synced`);
 
           const id = path.parse(path.posix.basename(event.path)).name;
           const filename = path.posix
@@ -59,11 +38,10 @@ async function main() {
 
           if (fs.existsSync(oldPath)) {
             try {
-              console.log(`Moving [${id}]`, oldPath, " to ", newPath);
               fs.renameSync(oldPath, newPath);
             } catch (err: any) {
-              console.log(err.message);
-              console.log("Error while moving file");
+              log(`Could not rename file`, "ERROR");
+              log(err.message, "ERROR");
             }
           }
 
@@ -71,7 +49,7 @@ async function main() {
             await uploadFileToBucket(event.path);
             await fetch(`${process.env.API_URL}/api/processed?id=${id}`);
           } catch (err) {
-            console.log("Error when uploading to bucket");
+            log(`Could not upload file to bucket`, "ERROR");
           }
         });
       }
@@ -87,12 +65,11 @@ function checkFolder() {
 
     const files = getNonEmptyFiles(config.GARMENT_WATCH_PATH);
     if (files.length > 0) {
-      console.log(`${files.length} files to be processed`);
+      log(`${files.length} files to be processed`, "NOTICE");
       files.forEach((filePath: string) => {
         const filename = path.basename(filePath);
         const newPath = path.join(config.GARMENT_PS_PROCESS_PATH, filename);
         fs.renameSync(filePath, newPath);
-        console.log(`Moved ${filePath} to ${newPath}`);
       });
 
       const fullPathString = files
@@ -101,11 +78,6 @@ function checkFolder() {
             `"${path.join(config.GARMENT_PS_PROCESS_PATH, path.basename(filePath))}"`,
         )
         .join(" ");
-
-      console.log(fullPathString);
-      console.log(
-        `open -a ${config.GARMENT_FILTER_APP.replace(/(\s+)/g, "\\$1")} ${fullPathString}`,
-      );
 
       execSync(
         `open -a ${config.GARMENT_FILTER_APP.replace(/(\s+)/g, "\\$1")} ${fullPathString}`,
@@ -161,7 +133,10 @@ async function checkFileSize(
       clearInterval(fileSizeTimer);
       callback();
     } else {
-      console.log(`File ${filePath} is not synced by Dropbox yet...`);
+      log(
+        `File ${shortPath(filePath)} is not synced to dropbox yet...`,
+        "NOTICE",
+      );
     }
   }, interval);
 }
@@ -170,10 +145,6 @@ async function uploadFileToBucket(filepath: string) {
   try {
     const stats = fs.statSync(filepath);
     const fileSizeInBytes = stats.size;
-
-    console.log(
-      `Uploading ${filepath} (${Math.round(fileSizeInBytes / 1024)}kb)`,
-    );
 
     const fileName = path.posix.basename(filepath);
     const gcs = storage.bucket("gs://minikit-images-garments");
@@ -209,8 +180,12 @@ async function uploadFileToBucket(filepath: string) {
 
     fs.renameSync(filepath, newPath);
 
-    console.log(`Upload for ${filepath} completed`);
+    log(
+      `Succesfully uploaded ${shortPath(filepath)} (${Math.round(fileSizeInBytes / 1024)}kb)`,
+      "NOTICE",
+    );
   } catch (error: any) {
+    log("Error during upload", "ERROR");
     console.log(error.message);
     throw new Error(error.message);
   }
