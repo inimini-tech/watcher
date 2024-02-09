@@ -5,8 +5,8 @@
   "main": "index.js",
   "scripts": {
     "build": "tsup --dts",
-    "start": "pm2 start dist/main.js",
-    "stop": "pm2 stop dist/main.js",
+    "start": "pm2 start src/main.ts",
+    "stop": "pm2 stop src/main.ts",
     "dev": "tsup --watch "
   },
   "keywords": [],
