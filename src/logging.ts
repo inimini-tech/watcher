@@ -1,5 +1,5 @@
 import chalk from "chalk";
-import path from "node:fs";
+import path from "path";
 const error = chalk.bold.red;
 const warning = chalk.hex("#FFA500");
 const notice = chalk.cyan;
@@ -22,8 +22,6 @@ export function log(string: string, type?: "ERROR" | "WARNING" | "NOTICE") {
 }
 
 export function shortPath(filePath: string) {
-  const path = require("path");
-
   const fileName = path.basename(filePath);
   const parentFolder = path.basename(path.dirname(filePath));
 
