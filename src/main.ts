@@ -68,7 +68,13 @@ function checkFolder() {
       log(`${files.length} files to be processed`, "NOTICE");
       files.forEach((filePath: string) => {
         const filename = path.basename(filePath);
-        const newPath = path.join(config.GARMENT_PS_PROCESS_PATH, filename);
+        const sanitizedFileName = filename.startsWith(".")
+          ? filename.substring(1)
+          : filename;
+        const newPath = path.join(
+          config.GARMENT_PS_PROCESS_PATH,
+          sanitizedFileName,
+        );
         fs.renameSync(filePath, newPath);
       });
 
@@ -113,11 +119,7 @@ function getNonEmptyFiles(folderPath: string): string[] {
     const stats = fs.statSync(filePath);
     if (stats.size > 0 && stats.isFile()) {
       const extension = path.extname(filePath).toLowerCase();
-      const fileName = path.basename(filePath);
-      if (
-        !fileName.startsWith(".") &&
-        (extension === ".jpg" || extension === ".jpeg")
-      ) {
+      if (extension === ".jpg" || extension === ".jpeg") {
         files.push(filePath);
       }
     }
