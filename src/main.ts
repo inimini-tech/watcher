@@ -113,7 +113,11 @@ function getNonEmptyFiles(folderPath: string): string[] {
     const stats = fs.statSync(filePath);
     if (stats.size > 0 && stats.isFile()) {
       const extension = path.extname(filePath).toLowerCase();
-      if (extension === ".jpg" || extension === ".jpeg") {
+      const fileName = path.basename(filePath);
+      if (
+        !fileName.startsWith(".") &&
+        (extension === ".jpg" || extension === ".jpeg")
+      ) {
         files.push(filePath);
       }
     }
