@@ -79,10 +79,13 @@ function checkFolder() {
       });
 
       const fullPathString = files
-        .map(
-          (filePath) =>
-            `"${path.join(config.GARMENT_PS_PROCESS_PATH, path.basename(filePath))}"`,
-        )
+        .map((filePath) => {
+          const fileName = path.basename(filePath);
+          const sanitizedFileName = fileName.startsWith(".")
+            ? fileName.substring(1)
+            : fileName;
+          return `"${path.join(config.GARMENT_PS_PROCESS_PATH, sanitizedFileName)}"`;
+        })
         .join(" ");
 
       execSync(
