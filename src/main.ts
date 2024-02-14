@@ -17,6 +17,7 @@ const storage = new Storage({
 async function main() {
   log("Starting watcher", "NOTICE");
   checkFolder();
+  checkWorkFolder();
 
   await watcher.subscribe(config.GARMENT_PS_WATCH_PATH, async (err, events) => {
     for (let i = 0; i < events.length; i++) {
@@ -93,6 +94,63 @@ function checkFolder() {
       );
     }
   }, 10000);
+}
+
+function checkWorkFolder() {
+  setInterval(
+    () => {
+      const currentTimestamp = Date.now();
+      const files = fs.readdirSync(config.GARMENT_PS_PROCESS_PATH);
+      const jpgFiles = files.filter(
+        (file) => path.extname(file).toLowerCase() === ".jpg",
+      );
+
+      if (jpgFiles.length > 0) {
+        log(
+          `${jpgFiles.length} files older than 1 hour detected, attempting to move to watch folder.`,
+          "WARNING",
+        );
+
+        try {
+          jpgFiles.forEach((file) => {
+            const filePath = path.join(config.GARMENT_PS_PROCESS_PATH, file);
+            const stats = fs.statSync(filePath);
+            const fileAgeInHours =
+              (currentTimestamp - stats.mtimeMs) / (1000 * 60 * 60);
+            if (fileAgeInHours > 1) {
+              const oldPath = path.join(config.GARMENT_PS_PROCESS_PATH, file);
+              const newPath = path.join(config.GARMENT_WATCH_PATH, file);
+              fs.renameSync(oldPath, newPath);
+            }
+          });
+
+          log(`Moved ${jpgFiles.length} files back to watch folder.`, "NOTICE");
+
+          const photoshopProcessName = "Adobe Photoshop";
+          const psProcess = execSync(
+            `ps aux | grep "${photoshopProcessName}" | grep -v grep`,
+          ).toString();
+          if (psProcess) {
+            const psProcessLines = psProcess.split("\n");
+            psProcessLines.forEach((line) => {
+              const processInfo = line.trim().split(/\s+/);
+              const pid = processInfo[1];
+              if (pid) {
+                execSync(`kill -9 ${pid}`);
+                log(
+                  `Killed process ${pid} for ${photoshopProcessName}`,
+                  "NOTICE",
+                );
+              }
+            });
+          }
+        } catch (moveError: any) {
+          log(`Failed to move .jpg files: ${moveError.message}`, "ERROR");
+        }
+      }
+    },
+    1000 * 60 * 60, // Check every hour
+  );
 }
 
 function countJpegFiles(folderPath: string): number {
