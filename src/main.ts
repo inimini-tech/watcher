@@ -149,7 +149,7 @@ function checkWorkFolder() {
         }
       }
     },
-    1000 * 60 * 60, // Check every hour
+    1000 * 60 * 30, // Check every 30 min
   );
 }
 
