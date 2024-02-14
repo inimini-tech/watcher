@@ -117,7 +117,8 @@ function getNonEmptyFiles(folderPath: string): string[] {
   const files: string[] = [];
   const filenames = fs.readdirSync(folderPath);
 
-  filenames.forEach((filename) => {
+  for (const filename of filenames) {
+    if (files.length >= 40) break;
     const filePath = path.join(folderPath, filename);
     const stats = fs.statSync(filePath);
     if (stats.size > 0 && stats.isFile()) {
@@ -126,7 +127,7 @@ function getNonEmptyFiles(folderPath: string): string[] {
         files.push(filePath);
       }
     }
-  });
+  }
 
   return files;
 }
