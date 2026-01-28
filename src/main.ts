@@ -6,6 +6,7 @@ import path from "path";
 import { execSync } from "child_process";
 import { Storage } from "@google-cloud/storage";
 import { shortPath, log } from "./logging";
+import { startAgentsWatcher } from "./agents";
 
 let ps = false;
 
@@ -18,6 +19,7 @@ async function main() {
   log("Starting watcher", "NOTICE");
   checkFolder();
   checkWorkFolder();
+  startAgentsWatcher();
 
   await watcher.subscribe(config.GARMENT_PS_WATCH_PATH, async (err, events) => {
     for (let i = 0; i < events.length; i++) {
