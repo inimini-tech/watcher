@@ -51,7 +51,7 @@ function getClient(): GoogleGenAI {
 }
 
 function getModel(): string {
-  return process.env.GEMINI_BATCH_MODEL || "gemini-2.0-flash-exp";
+  return process.env.GEMINI_BATCH_MODEL || "gemini-3-pro-image-preview";
 }
 
 // --- Helpers ---
