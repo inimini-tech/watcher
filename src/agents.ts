@@ -326,14 +326,14 @@ async function processJobResults(
                   // Save the image
                   const ext = part.inlineData.mimeType === "image/png" ? ".png" : ".jpg";
                   const baseName = path.parse(key).name;
-                  const outputFilename = `${baseName}_upscaled${ext}`;
+                  const outputFilename = `${baseName}{ext}`;
                   const outputPath = path.join(config.AGENTS_UPSCALE_OUT_PATH, outputFilename);
 
                   const imageBuffer = Buffer.from(part.inlineData.data, "base64");
                   fs.writeFileSync(outputPath, imageBuffer);
                   savedCount++;
 
-                  log(`[Agents] Saved upscaled image: ${shortPath(outputPath)}`, "NOTICE");
+                  log(`[Agents] Saved image: ${shortPath(outputPath)}`, "NOTICE");
                 } else if (part.text) {
                   log(
                     `[Agents] Response text for ${key}: ${part.text.substring(0, 200)}`,
@@ -349,7 +349,7 @@ async function processJobResults(
       }
     }
 
-    log(`[Agents] Saved ${savedCount} upscaled image(s)`, "NOTICE");
+    log(`[Agents] Saved ${savedCount} image(s)`, "NOTICE");
 
     // Clean up temp file
     try {
