@@ -149,7 +149,7 @@ async function submitNewFiles(): Promise<void> {
                   },
                 },
                 {
-                  text: "Upscale this image to 4x resolution, maintaining quality and detail.",
+                  text: "Remove some wrinkles. Don't change the layout.",
                 },
               ],
             },
@@ -335,7 +335,10 @@ async function processJobResults(
 
                   log(`[Agents] Saved upscaled image: ${shortPath(outputPath)}`, "NOTICE");
                 } else if (part.text) {
-                  log(`[Agents] Response text for ${key}: ${part.text.substring(0, 200)}`, "NOTICE");
+                  log(
+                    `[Agents] Response text for ${key}: ${part.text.substring(0, 200)}`,
+                    "NOTICE",
+                  );
                 }
               }
             }
@@ -409,7 +412,10 @@ export function startAgentsWatcher(): void {
     runAgentsCycle();
   }, INTERVAL_MS);
 
-  log(`[Agents] Watching ${shortPath(config.AGENTS_WATCH_PATH)} (interval: ${INTERVAL_MS / 1000}s)`, "NOTICE");
+  log(
+    `[Agents] Watching ${shortPath(config.AGENTS_WATCH_PATH)} (interval: ${INTERVAL_MS / 1000}s)`,
+    "NOTICE",
+  );
 }
 
 async function runAgentsCycle(): Promise<void> {
