@@ -160,30 +160,22 @@ async function submitNewFiles(): Promise<void> {
     }
 
     const jsonlContent = jsonlLines.join("\n");
-
-    // Write temp JSONL file
-    const tempDir = os.tmpdir();
     const timestamp = Date.now();
-    const tempFilePath = path.join(tempDir, `agents-batch-${timestamp}.jsonl`);
-    fs.writeFileSync(tempFilePath, jsonlContent, "utf-8");
 
     log(`[Agents] Uploading batch JSONL (${movedFiles.length} images)...`, "NOTICE");
 
-    // Upload JSONL to Gemini File API
+    // Upload JSONL to Gemini File API using Blob to avoid Node.js
+    // FileHandle.read() compatibility issues with the SDK
+    const jsonlBlob = new Blob([jsonlContent], {
+      type: "application/vnd.google.generativeai.jsonl",
+    });
     const uploadedFile = await client.files.upload({
-      file: tempFilePath,
+      file: jsonlBlob,
       config: {
         mimeType: "application/vnd.google.generativeai.jsonl",
         displayName: `agents-batch-${timestamp}`,
       },
     });
-
-    // Clean up temp file
-    try {
-      fs.unlinkSync(tempFilePath);
-    } catch {
-      // ignore
-    }
 
     if (!uploadedFile.name) {
       throw new Error("Upload succeeded but no file name returned");
