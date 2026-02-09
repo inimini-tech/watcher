@@ -19,7 +19,9 @@ async function main() {
   log("Starting watcher", "NOTICE");
   checkFolder();
   checkWorkFolder();
-  startAgentsWatcher();
+  if (process.env.ENABLE_AGENTS === "true") {
+    startAgentsWatcher();
+  }
 
   await watcher.subscribe(config.GARMENT_PS_WATCH_PATH, async (err, events) => {
     for (let i = 0; i < events.length; i++) {
