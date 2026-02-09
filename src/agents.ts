@@ -149,7 +149,7 @@ async function submitNewFiles(): Promise<void> {
                   },
                 },
                 {
-                  text: "Remove some wrinkles. Don't change the layout.",
+                  text: "Remove some wrinkles. Don't change the layout. Don't change the resolution. Don't change the aspect ratio.",
                 },
               ],
             },
