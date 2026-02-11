@@ -1,13 +1,14 @@
 {
   "name": "watcher",
-  "version": "2.1.2",
+  "version": "2.2.0",
   "description": "",
   "main": "index.js",
   "scripts": {
     "build": "tsup --dts",
     "start": "pm2 start src/main.ts",
     "stop": "pm2 stop src/main.ts",
-    "dev": "tsup --watch "
+    "dev": "tsup --watch ",
+    "monitor": "npx tsx src/monitor.ts"
   },
   "keywords": [],
   "author": "",

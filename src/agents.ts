@@ -7,7 +7,7 @@ import { GoogleGenAI, JobState } from "@google/genai";
 
 // --- Types ---
 
-interface BatchJobState {
+export interface BatchJobState {
   jobName: string;
   files: string[]; // original filenames
   submittedAt: number;
@@ -16,7 +16,7 @@ interface BatchJobState {
 
 // --- State ---
 
-const STATE_FILE = path.join(__dirname, "agents-state.json");
+export const STATE_FILE = path.join(__dirname, "..", "agents-state.json");
 let pendingJobs: BatchJobState[] = [];
 
 function loadState(): void {
@@ -326,7 +326,7 @@ async function processJobResults(
                   // Save the image
                   const ext = part.inlineData.mimeType === "image/png" ? ".png" : ".jpg";
                   const baseName = path.parse(key).name;
-                  const outputFilename = `${baseName}{ext}`;
+                  const outputFilename = `${baseName}${ext}`;
                   const outputPath = path.join(config.AGENTS_UPSCALE_OUT_PATH, outputFilename);
 
                   const imageBuffer = Buffer.from(part.inlineData.data, "base64");
