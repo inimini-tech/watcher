@@ -149,11 +149,18 @@ async function submitNewFiles(): Promise<void> {
                   },
                 },
                 {
-                  text: "Remove some wrinkles. Don't change the layout. Don't change the resolution. Don't change the aspect ratio.",
+                  text: "Remove some wrinkles. Don't change the layout.",
                 },
               ],
             },
           ],
+          generationConfig: {
+            responseModalities: ["IMAGE"],
+            imageConfig: {
+              aspectRatio: "1:1",
+              imageSize: "2K",
+            },
+          },
         },
       };
       jsonlLines.push(JSON.stringify(request));
