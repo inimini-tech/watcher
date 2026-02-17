@@ -1,15 +1,22 @@
 import fs from "node:fs";
 import path from "path";
 import os from "os";
+import sharp from "sharp";
 import { config } from "./config";
 import { shortPath, log } from "./logging";
 import { GoogleGenAI, JobState } from "@google/genai";
 
 // --- Types ---
 
+export interface ImageDimensions {
+  width: number;
+  height: number;
+}
+
 export interface BatchJobState {
   jobName: string;
   files: string[]; // original filenames
+  fileDimensions: Record<string, ImageDimensions>; // original dimensions per file
   submittedAt: number;
   status: "pending" | "running" | "succeeded" | "failed";
 }
@@ -128,13 +135,25 @@ async function submitNewFiles(): Promise<void> {
     const client = getClient();
     const model = getModel();
 
-    // Build JSONL content
+    // Read original dimensions and build JSONL content
+    const fileDimensions: Record<string, ImageDimensions> = {};
     const jsonlLines: string[] = [];
     for (const filename of movedFiles) {
       const filePath = path.join(config.AGENTS_PROCESSING_PATH, filename);
       const fileData = fs.readFileSync(filePath);
       const base64 = fileData.toString("base64");
       const mimeType = getMimeType(filename);
+
+      // Store original dimensions
+      try {
+        const metadata = await sharp(fileData).metadata();
+        if (metadata.width && metadata.height) {
+          fileDimensions[filename] = { width: metadata.width, height: metadata.height };
+          log(`[Agents] ${filename} original size: ${metadata.width}x${metadata.height}`, "NOTICE");
+        }
+      } catch (dimErr: any) {
+        log(`[Agents] Could not read dimensions for ${filename}: ${dimErr.message}`, "WARNING");
+      }
 
       const request = {
         key: filename,
@@ -158,7 +177,7 @@ async function submitNewFiles(): Promise<void> {
             responseModalities: ["IMAGE"],
             imageConfig: {
               aspectRatio: "1:1",
-              imageSize: "2K",
+              imageSize: "1K",
             },
           },
         },
@@ -209,6 +228,7 @@ async function submitNewFiles(): Promise<void> {
     const jobState: BatchJobState = {
       jobName: batchJob.name,
       files: movedFiles,
+      fileDimensions,
       submittedAt: timestamp,
       status: "pending",
     };
@@ -336,7 +356,20 @@ async function processJobResults(
                   const outputFilename = `${baseName}${ext}`;
                   const outputPath = path.join(config.AGENTS_UPSCALE_OUT_PATH, outputFilename);
 
-                  const imageBuffer = Buffer.from(part.inlineData.data, "base64");
+                  let imageBuffer = Buffer.from(part.inlineData.data, "base64");
+
+                  // Resize to original dimensions if known
+                  const originalDims = job.fileDimensions?.[key];
+                  if (originalDims) {
+                    imageBuffer = await sharp(imageBuffer)
+                      .resize(originalDims.width, originalDims.height)
+                      .toBuffer();
+                    log(
+                      `[Agents] Resized ${outputFilename} to ${originalDims.width}x${originalDims.height}`,
+                      "NOTICE",
+                    );
+                  }
+
                   fs.writeFileSync(outputPath, imageBuffer);
                   savedCount++;
 
