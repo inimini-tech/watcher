@@ -6,6 +6,13 @@ import { config } from "./config";
 import { shortPath, log } from "./logging";
 import { GoogleGenAI, JobState } from "@google/genai";
 
+// --- Constants ---
+
+const MAX_BATCH_SIZE = 10;
+const DOWNLOAD_DELAY_MS = 15_000; // 15 seconds delay after job success
+const MAX_RETRIES = 3;
+const INITIAL_RETRY_DELAY_MS = 5_000; // 5 seconds, doubles each retry
+
 // --- Types ---
 
 export interface ImageDimensions {
@@ -105,6 +112,41 @@ function getImageFiles(dirPath: string): string[] {
   });
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function retryWithBackoff<T>(
+  fn: () => Promise<T>,
+  label: string,
+): Promise<T> {
+  let lastError: any;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      return await fn();
+    } catch (err: any) {
+      lastError = err;
+      if (attempt < MAX_RETRIES) {
+        const delay = INITIAL_RETRY_DELAY_MS * 2 ** attempt;
+        log(
+          `[Agents] ${label} failed (attempt ${attempt + 1}/${MAX_RETRIES + 1}): ${err.message}. Retrying in ${delay / 1000}s...`,
+          "WARNING",
+        );
+        await sleep(delay);
+      }
+    }
+  }
+  throw lastError;
+}
+
+function chunkArray<T>(arr: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) {
+    chunks.push(arr.slice(i, i + size));
+  }
+  return chunks;
+}
+
 // --- Task A: Submit new files ---
 
 async function submitNewFiles(): Promise<void> {
@@ -131,126 +173,153 @@ async function submitNewFiles(): Promise<void> {
 
   if (movedFiles.length === 0) return;
 
-  try {
-    const client = getClient();
-    const model = getModel();
+  // Split into smaller batches
+  const batches = chunkArray(movedFiles, MAX_BATCH_SIZE);
+  log(
+    `[Agents] Splitting ${movedFiles.length} image(s) into ${batches.length} batch(es) of up to ${MAX_BATCH_SIZE}`,
+    "NOTICE",
+  );
 
-    // Read original dimensions and build JSONL content
-    const fileDimensions: Record<string, ImageDimensions> = {};
-    const jsonlLines: string[] = [];
-    for (const filename of movedFiles) {
-      const filePath = path.join(config.AGENTS_PROCESSING_PATH, filename);
-      const fileData = fs.readFileSync(filePath);
-      const base64 = fileData.toString("base64");
-      const mimeType = getMimeType(filename);
+  for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+    const batchFiles = batches[batchIndex];
+    try {
+      await submitBatch(batchFiles, batchIndex + 1, batches.length);
+    } catch (err: any) {
+      log(
+        `[Agents] Failed to submit batch ${batchIndex + 1}/${batches.length}: ${err.message}`,
+        "ERROR",
+      );
 
-      // Store original dimensions
-      try {
-        const metadata = await sharp(fileData).metadata();
-        if (metadata.width && metadata.height) {
-          fileDimensions[filename] = { width: metadata.width, height: metadata.height };
-          log(`[Agents] ${filename} original size: ${metadata.width}x${metadata.height}`, "NOTICE");
+      // Move files back to watch folder on failure
+      for (const filename of batchFiles) {
+        const src = path.join(config.AGENTS_PROCESSING_PATH, filename);
+        const dest = path.join(config.AGENTS_WATCH_PATH, filename);
+        try {
+          if (fs.existsSync(src)) {
+            fs.renameSync(src, dest);
+            log(`[Agents] Moved ${filename} back to watch folder`, "WARNING");
+          }
+        } catch (moveErr: any) {
+          log(`[Agents] Failed to move ${filename} back: ${moveErr.message}`, "ERROR");
         }
-      } catch (dimErr: any) {
-        log(`[Agents] Could not read dimensions for ${filename}: ${dimErr.message}`, "WARNING");
-      }
-
-      const request = {
-        key: filename,
-        request: {
-          contents: [
-            {
-              parts: [
-                {
-                  inline_data: {
-                    mime_type: mimeType,
-                    data: base64,
-                  },
-                },
-                {
-                  text: "Remove some wrinkles. Don't change the layout.",
-                },
-              ],
-            },
-          ],
-          generationConfig: {
-            responseModalities: ["IMAGE"],
-            imageConfig: {
-              aspectRatio: "1:1",
-              imageSize: "1K",
-            },
-          },
-        },
-      };
-      jsonlLines.push(JSON.stringify(request));
-    }
-
-    const jsonlContent = jsonlLines.join("\n");
-    const timestamp = Date.now();
-
-    log(`[Agents] Uploading batch JSONL (${movedFiles.length} images)...`, "NOTICE");
-
-    // Upload JSONL to Gemini File API using Blob to avoid Node.js
-    // FileHandle.read() compatibility issues with the SDK
-    const jsonlBlob = new Blob([jsonlContent], {
-      type: "application/vnd.google.generativeai.jsonl",
-    });
-    const uploadedFile = await client.files.upload({
-      file: jsonlBlob,
-      config: {
-        mimeType: "application/vnd.google.generativeai.jsonl",
-        displayName: `agents-batch-${timestamp}`,
-      },
-    });
-
-    if (!uploadedFile.name) {
-      throw new Error("Upload succeeded but no file name returned");
-    }
-
-    log(`[Agents] Uploaded file: ${uploadedFile.name}`, "NOTICE");
-
-    // Create batch job
-    const batchJob = await client.batches.create({
-      model: model,
-      src: uploadedFile.name,
-      config: {
-        displayName: `agents-upscale-${timestamp}`,
-      },
-    });
-
-    if (!batchJob.name) {
-      throw new Error("Batch job created but no name returned");
-    }
-
-    log(`[Agents] Created batch job: ${batchJob.name}`, "NOTICE");
-
-    // Track job
-    const jobState: BatchJobState = {
-      jobName: batchJob.name,
-      files: movedFiles,
-      fileDimensions,
-      submittedAt: timestamp,
-      status: "pending",
-    };
-    pendingJobs.push(jobState);
-    saveState();
-  } catch (err: any) {
-    log(`[Agents] Failed to submit batch job: ${err.message}`, "ERROR");
-
-    // Move files back to watch folder on failure
-    for (const filename of movedFiles) {
-      const src = path.join(config.AGENTS_PROCESSING_PATH, filename);
-      const dest = path.join(config.AGENTS_WATCH_PATH, filename);
-      try {
-        if (fs.existsSync(src)) {
-          fs.renameSync(src, dest);
-          log(`[Agents] Moved ${filename} back to watch folder`, "WARNING");
-        }
-      } catch (moveErr: any) {
-        log(`[Agents] Failed to move ${filename} back: ${moveErr.message}`, "ERROR");
       }
     }
   }
+}
+
+async function submitBatch(
+  batchFiles: string[],
+  batchNum: number,
+  totalBatches: number,
+): Promise<void> {
+  const client = getClient();
+  const model = getModel();
+
+  // Read original dimensions and build JSONL content
+  const fileDimensions: Record<string, ImageDimensions> = {};
+  const jsonlLines: string[] = [];
+  for (const filename of batchFiles) {
+    const filePath = path.join(config.AGENTS_PROCESSING_PATH, filename);
+    const fileData = fs.readFileSync(filePath);
+    const base64 = fileData.toString("base64");
+    const mimeType = getMimeType(filename);
+
+    // Store original dimensions
+    try {
+      const metadata = await sharp(fileData).metadata();
+      if (metadata.width && metadata.height) {
+        fileDimensions[filename] = { width: metadata.width, height: metadata.height };
+        log(`[Agents] ${filename} original size: ${metadata.width}x${metadata.height}`, "NOTICE");
+      }
+    } catch (dimErr: any) {
+      log(`[Agents] Could not read dimensions for ${filename}: ${dimErr.message}`, "WARNING");
+    }
+
+    const request = {
+      key: filename,
+      request: {
+        contents: [
+          {
+            parts: [
+              {
+                inline_data: {
+                  mime_type: mimeType,
+                  data: base64,
+                },
+              },
+              {
+                text: "Remove some wrinkles. Don't change the layout.",
+              },
+            ],
+          },
+        ],
+        generationConfig: {
+          responseModalities: ["IMAGE"],
+          imageConfig: {
+            aspectRatio: "1:1",
+            imageSize: "1K",
+          },
+        },
+      },
+    };
+    jsonlLines.push(JSON.stringify(request));
+  }
+
+  const jsonlContent = jsonlLines.join("\n");
+  const timestamp = Date.now();
+
+  log(
+    `[Agents] Uploading batch ${batchNum}/${totalBatches} JSONL (${batchFiles.length} images)...`,
+    "NOTICE",
+  );
+
+  // Upload JSONL to Gemini File API using Blob to avoid Node.js
+  // FileHandle.read() compatibility issues with the SDK
+  const jsonlBlob = new Blob([jsonlContent], {
+    type: "application/vnd.google.generativeai.jsonl",
+  });
+  const uploadedFile = await client.files.upload({
+    file: jsonlBlob,
+    config: {
+      mimeType: "application/vnd.google.generativeai.jsonl",
+      displayName: `agents-batch-${timestamp}-${batchNum}`,
+    },
+  });
+
+  if (!uploadedFile.name) {
+    throw new Error("Upload succeeded but no file name returned");
+  }
+
+  log(`[Agents] Uploaded file: ${uploadedFile.name}`, "NOTICE");
+
+  // Create batch job
+  const batchJob = await client.batches.create({
+    model: model,
+    src: uploadedFile.name,
+    config: {
+      displayName: `agents-upscale-${timestamp}-${batchNum}`,
+    },
+  });
+
+  if (!batchJob.name) {
+    throw new Error("Batch job created but no name returned");
+  }
+
+  log(
+    `[Agents] Created batch job ${batchNum}/${totalBatches}: ${batchJob.name}`,
+    "NOTICE",
+  );
+
+  // Track job
+  const jobState: BatchJobState = {
+    jobName: batchJob.name,
+    files: batchFiles,
+    fileDimensions,
+    submittedAt: timestamp,
+    status: "pending",
+  };
+  pendingJobs.push(jobState);
+  saveState();
 }
 
 // --- Task B: Check pending jobs ---
@@ -259,52 +328,76 @@ async function checkPendingJobs(): Promise<void> {
   if (pendingJobs.length === 0) return;
 
   const client = getClient();
+
+  // Check all jobs concurrently
+  const results = await Promise.allSettled(
+    pendingJobs.map((job, i) => checkSingleJob(client, job, i)),
+  );
+
+  // Collect indices to remove (jobs that are done)
   const jobsToRemove: number[] = [];
-
-  for (let i = 0; i < pendingJobs.length; i++) {
-    const job = pendingJobs[i];
-    if (job.status === "succeeded" || job.status === "failed") {
-      jobsToRemove.push(i);
-      continue;
-    }
-
-    try {
-      const result = await client.batches.get({ name: job.jobName });
-      log(`[Agents] Job ${job.jobName} status: ${result.state}`, "NOTICE");
-
-      if (result.state === JobState.JOB_STATE_SUCCEEDED) {
-        job.status = "succeeded";
-        log(`[Agents] Batch job succeeded: ${job.jobName}`, "NOTICE");
-
-        // Download and process results
-        await processJobResults(client, job, result);
-        jobsToRemove.push(i);
-      } else if (result.state === JobState.JOB_STATE_FAILED) {
-        job.status = "failed";
-        log(`[Agents] Batch job failed: ${job.jobName}`, "ERROR");
-
-        // Move originals back to watch folder
-        moveFilesBack(job.files);
-        jobsToRemove.push(i);
-      } else if (result.state === JobState.JOB_STATE_CANCELLED) {
-        job.status = "failed";
-        log(`[Agents] Batch job cancelled: ${job.jobName}`, "WARNING");
-
-        moveFilesBack(job.files);
-        jobsToRemove.push(i);
-      }
-      // Otherwise still pending/running — leave it
-    } catch (err: any) {
-      log(`[Agents] Failed to check job ${job.jobName}: ${err.message}`, "ERROR");
+  for (const result of results) {
+    if (result.status === "fulfilled" && result.value !== undefined) {
+      jobsToRemove.push(result.value);
     }
   }
 
   // Remove completed/failed jobs from list (reverse to keep indices valid)
   if (jobsToRemove.length > 0) {
-    for (let i = jobsToRemove.length - 1; i >= 0; i--) {
-      pendingJobs.splice(jobsToRemove[i], 1);
+    jobsToRemove.sort((a, b) => b - a);
+    for (const idx of jobsToRemove) {
+      pendingJobs.splice(idx, 1);
     }
     saveState();
+  }
+}
+
+async function checkSingleJob(
+  client: GoogleGenAI,
+  job: BatchJobState,
+  index: number,
+): Promise<number | undefined> {
+  if (job.status === "succeeded" || job.status === "failed") {
+    return index;
+  }
+
+  try {
+    const result = await client.batches.get({ name: job.jobName });
+    log(`[Agents] Job ${job.jobName} status: ${result.state}`, "NOTICE");
+
+    if (result.state === JobState.JOB_STATE_SUCCEEDED) {
+      job.status = "succeeded";
+      log(`[Agents] Batch job succeeded: ${job.jobName}`, "NOTICE");
+
+      // Wait before downloading to let the file API catch up
+      log(
+        `[Agents] Waiting ${DOWNLOAD_DELAY_MS / 1000}s before downloading results...`,
+        "NOTICE",
+      );
+      await sleep(DOWNLOAD_DELAY_MS);
+
+      // Download and process results with retry
+      await processJobResults(client, job, result);
+      return index;
+    } else if (result.state === JobState.JOB_STATE_FAILED) {
+      job.status = "failed";
+      log(`[Agents] Batch job failed: ${job.jobName}`, "ERROR");
+
+      // Move originals back to watch folder
+      moveFilesBack(job.files);
+      return index;
+    } else if (result.state === JobState.JOB_STATE_CANCELLED) {
+      job.status = "failed";
+      log(`[Agents] Batch job cancelled: ${job.jobName}`, "WARNING");
+
+      moveFilesBack(job.files);
+      return index;
+    }
+    // Otherwise still pending/running — leave it
+    return undefined;
+  } catch (err: any) {
+    log(`[Agents] Failed to check job ${job.jobName}: ${err.message}`, "ERROR");
+    return undefined;
   }
 }
 
@@ -322,14 +415,18 @@ async function processJobResults(
       return;
     }
 
-    // Download result JSONL
+    // Download result JSONL with retry
     const tempDir = os.tmpdir();
     const tempOutputPath = path.join(tempDir, `agents-result-${Date.now()}.jsonl`);
 
-    await client.files.download({
-      file: destFileName,
-      downloadPath: tempOutputPath,
-    });
+    await retryWithBackoff(
+      () =>
+        client.files.download({
+          file: destFileName,
+          downloadPath: tempOutputPath,
+        }),
+      `Download results for ${job.jobName}`,
+    );
 
     log(`[Agents] Downloaded results for job ${job.jobName}`, "NOTICE");
 
@@ -410,7 +507,10 @@ async function processJobResults(
       }
     }
   } catch (err: any) {
-    log(`[Agents] Failed to process results for job ${job.jobName}: ${err.message}`, "ERROR");
+    log(
+      `[Agents] Failed to process results for job ${job.jobName}: ${err.message}`,
+      "ERROR",
+    );
   }
 }
 
