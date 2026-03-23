@@ -3,8 +3,10 @@ import fs from "node:fs";
 import path from "path";
 import chalk from "chalk";
 import type { BatchJobState } from "./agents";
+import { config } from "./config";
 
 const STATE_FILE = path.join(__dirname, "..", "agents-state.json");
+const LOGS_DIR = path.join(config.AGENTS_PROCESSING_PATH, "..", "_AGENTS_LOGS");
 const REFRESH_INTERVAL = 10000;
 
 function loadState(): BatchJobState[] {
@@ -97,7 +99,105 @@ function render() {
   if (failed) parts.push(chalk.red(`${failed} failed`));
 
   console.log(`  ${parts.join("  ")}`);
+
+  // --- Previous Batches ---
+  renderBatchHistory();
+
   console.log(chalk.gray(`\n  State file: ${STATE_FILE}`));
+  console.log(chalk.gray(`  Logs dir:   ${LOGS_DIR}`));
+}
+
+interface BatchLogSummary {
+  filename: string;
+  sent: number;
+  received: number;
+  hasError: boolean;
+  timestamp: string; // from the first log line
+}
+
+function parseBatchLogs(): BatchLogSummary[] {
+  if (!fs.existsSync(LOGS_DIR)) return [];
+
+  const logFiles = fs.readdirSync(LOGS_DIR).filter((f) => f.endsWith(".log"));
+  const summaries: BatchLogSummary[] = [];
+
+  for (const logFile of logFiles) {
+    const content = fs.readFileSync(path.join(LOGS_DIR, logFile), "utf-8");
+    const lines = content.split("\n");
+
+    let sent = 0;
+    let received = 0;
+    let hasError = false;
+    let timestamp = "";
+
+    for (const line of lines) {
+      if (!timestamp) {
+        const match = line.match(/^\[(\d{4}-\d{2}-\d{2}T[\d:.]+Z?)\]/);
+        if (match) timestamp = match[1];
+      }
+
+      if (line.includes("Files sent:")) {
+        const m = line.match(/Files sent:\s*(\d+)/);
+        if (m) sent = parseInt(m[1], 10);
+      }
+
+      if (line.includes("RECEIVED:")) {
+        received++;
+      }
+
+      if (line.includes("ERROR:")) {
+        hasError = true;
+      }
+    }
+
+    summaries.push({
+      filename: logFile.replace(/\.log$/, ""),
+      sent,
+      received,
+      hasError,
+      timestamp,
+    });
+  }
+
+  // Sort by timestamp descending (most recent first)
+  summaries.sort((a, b) => (b.timestamp > a.timestamp ? 1 : -1));
+
+  return summaries;
+}
+
+function renderBatchHistory(): void {
+  const summaries = parseBatchLogs();
+  if (summaries.length === 0) return;
+
+  console.log(chalk.bold(`\n  Previous Batches\n`));
+
+  const header = `  ${"RESULT".padEnd(16)} ${"BATCH".padEnd(52)} ${"DATE"}`;
+  console.log(chalk.gray(header));
+  console.log(chalk.gray("  " + "─".repeat(90)));
+
+  // Show last 20
+  for (const s of summaries.slice(0, 20)) {
+    const ratio = `${s.sent}/${s.received}`;
+    let resultStr: string;
+    if (s.hasError) {
+      resultStr = chalk.red(`${ratio} ⚠ ERR`);
+    } else if (s.received < s.sent) {
+      resultStr = chalk.yellow(`${ratio} partial`);
+    } else {
+      resultStr = chalk.green(`${ratio} ✓`);
+    }
+    // Pad with extra space for ANSI codes
+    const padded = resultStr + " ".repeat(Math.max(0, 16 - ratio.length - (s.hasError ? 6 : s.received < s.sent ? 8 : 2)));
+
+    const name = s.filename.length > 50 ? "…" + s.filename.slice(-49) : s.filename;
+    const date = s.timestamp ? new Date(s.timestamp).toLocaleString() : "—";
+
+    console.log(`  ${padded} ${name.padEnd(52)} ${date}`);
+  }
+
+  if (summaries.length > 20) {
+    console.log(chalk.gray(`  ... and ${summaries.length - 20} more (see ${LOGS_DIR})`));
+  }
 }
 
 render();

@@ -387,7 +387,13 @@ async function checkSingleJob(
       await sleep(DOWNLOAD_DELAY_MS);
 
       // Download and process results with retry
-      await processJobResults(client, job, result);
+      try {
+        await processJobResults(client, job, result);
+      } catch (processErr: any) {
+        log(`[Agents] Failed to process results, moving files back: ${processErr.message}`, "ERROR");
+        logBatchError(job.jobName, `Failed to process results: ${processErr.message}`);
+        moveFilesBack(job.files);
+      }
       return index;
     } else if (result.state === JobState.JOB_STATE_FAILED) {
       job.status = "failed";
@@ -424,6 +430,8 @@ async function processJobResults(
     const destFileName = result.dest?.fileName;
     if (!destFileName) {
       log(`[Agents] No output file found for job ${job.jobName}`, "WARNING");
+      logBatchError(job.jobName, "No output file returned by Gemini");
+      moveFilesBack(job.files);
       return;
     }
 
@@ -447,6 +455,7 @@ async function processJobResults(
     const lines = content.trim().split("\n");
 
     let savedCount = 0;
+    const filesWithResults = new Set<string>();
     for (const line of lines) {
       if (!line.trim()) continue;
       try {
@@ -481,6 +490,7 @@ async function processJobResults(
 
                   fs.writeFileSync(outputPath, imageBuffer);
                   savedCount++;
+                  filesWithResults.add(key);
 
                   logBatchReceived(job.jobName, outputFilename);
                   log(`[Agents] Saved image: ${shortPath(outputPath)}`, "NOTICE");
@@ -493,6 +503,9 @@ async function processJobResults(
               }
             }
           }
+        } else {
+          log(`[Agents] No image returned for ${key}`, "WARNING");
+          logBatchError(job.jobName, `No image returned for: ${key}`);
         }
       } catch (parseErr: any) {
         log(`[Agents] Failed to parse result line: ${parseErr.message}`, "ERROR");
@@ -503,6 +516,17 @@ async function processJobResults(
     log(`[Agents] Saved ${savedCount} image(s)`, "NOTICE");
     logBatchComplete(job.jobName, job.files.length, savedCount);
 
+    // Move back files that Gemini didn't return so they can be retried
+    const missingFiles = job.files.filter((f) => !filesWithResults.has(f));
+    if (missingFiles.length > 0) {
+      log(
+        `[Agents] ${missingFiles.length} file(s) got no result, moving back for retry: ${missingFiles.join(", ")}`,
+        "WARNING",
+      );
+      logBatchError(job.jobName, `Files without results: ${missingFiles.join(", ")}`);
+      moveFilesBack(missingFiles);
+    }
+
     // Clean up temp file
     try {
       fs.unlinkSync(tempOutputPath);
@@ -510,8 +534,8 @@ async function processJobResults(
       // ignore
     }
 
-    // Clean up processing files
-    for (const filename of job.files) {
+    // Clean up processing files (only those that got results)
+    for (const filename of Array.from(filesWithResults)) {
       const processingPath = path.join(config.AGENTS_PROCESSING_PATH, filename);
       try {
         if (fs.existsSync(processingPath)) {
@@ -527,6 +551,7 @@ async function processJobResults(
       "ERROR",
     );
     logBatchError(job.jobName, `Failed to process results: ${err.message}`);
+    throw err;
   }
 }
 
