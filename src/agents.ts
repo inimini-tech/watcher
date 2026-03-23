@@ -437,7 +437,8 @@ async function processJobResults(
 
     // Download result JSONL with retry
     const tempDir = os.tmpdir();
-    const tempOutputPath = path.join(tempDir, `agents-result-${Date.now()}.jsonl`);
+    const jobId = job.jobName.replace(/\//g, "-");
+    const tempOutputPath = path.join(tempDir, `agents-result-${jobId}-${Date.now()}.jsonl`);
 
     await retryWithBackoff(
       () =>
