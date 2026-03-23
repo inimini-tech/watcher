@@ -1,6 +1,6 @@
 import { log } from "./logging";
 
-const UPLOAD_LIMIT = 300;
+const UPLOAD_LIMIT = 100;
 const UPLOAD_WINDOW_MS = 60_000;
 const timestamps: number[] = [];
 
@@ -17,10 +17,7 @@ export async function waitForUploadSlot(): Promise<void> {
   }
 
   const waitMs = timestamps[0] - (now - UPLOAD_WINDOW_MS) + 50;
-  log(
-    `Rate limit reached (${UPLOAD_LIMIT}/min), waiting ${Math.round(waitMs / 1000)}s`,
-    "WARNING",
-  );
+  log(`Rate limit reached (${UPLOAD_LIMIT}/min), waiting ${Math.round(waitMs / 1000)}s`, "WARNING");
 
   return new Promise((resolve) => {
     setTimeout(() => {
