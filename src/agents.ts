@@ -5,6 +5,13 @@ import sharp from "sharp";
 import { config } from "./config";
 import { shortPath, log } from "./logging";
 import { GoogleGenAI, JobState } from "@google/genai";
+import {
+  logBatchSubmitted,
+  logBatchStatus,
+  logBatchReceived,
+  logBatchComplete,
+  logBatchError,
+} from "./batch-logger";
 
 // --- Constants ---
 
@@ -310,6 +317,8 @@ async function submitBatch(
     "NOTICE",
   );
 
+  logBatchSubmitted(batchJob.name, batchFiles);
+
   // Track job
   const jobState: BatchJobState = {
     jobName: batchJob.name,
@@ -368,6 +377,7 @@ async function checkSingleJob(
     if (result.state === JobState.JOB_STATE_SUCCEEDED) {
       job.status = "succeeded";
       log(`[Agents] Batch job succeeded: ${job.jobName}`, "NOTICE");
+      logBatchStatus(job.jobName, "succeeded");
 
       // Wait before downloading to let the file API catch up
       log(
@@ -382,6 +392,7 @@ async function checkSingleJob(
     } else if (result.state === JobState.JOB_STATE_FAILED) {
       job.status = "failed";
       log(`[Agents] Batch job failed: ${job.jobName}`, "ERROR");
+      logBatchError(job.jobName, "Batch job failed");
 
       // Move originals back to watch folder
       moveFilesBack(job.files);
@@ -389,6 +400,7 @@ async function checkSingleJob(
     } else if (result.state === JobState.JOB_STATE_CANCELLED) {
       job.status = "failed";
       log(`[Agents] Batch job cancelled: ${job.jobName}`, "WARNING");
+      logBatchError(job.jobName, "Batch job cancelled");
 
       moveFilesBack(job.files);
       return index;
@@ -470,6 +482,7 @@ async function processJobResults(
                   fs.writeFileSync(outputPath, imageBuffer);
                   savedCount++;
 
+                  logBatchReceived(job.jobName, outputFilename);
                   log(`[Agents] Saved image: ${shortPath(outputPath)}`, "NOTICE");
                 } else if (part.text) {
                   log(
@@ -483,10 +496,12 @@ async function processJobResults(
         }
       } catch (parseErr: any) {
         log(`[Agents] Failed to parse result line: ${parseErr.message}`, "ERROR");
+        logBatchError(job.jobName, `Failed to parse result line: ${parseErr.message}`);
       }
     }
 
     log(`[Agents] Saved ${savedCount} image(s)`, "NOTICE");
+    logBatchComplete(job.jobName, job.files.length, savedCount);
 
     // Clean up temp file
     try {
@@ -511,6 +526,7 @@ async function processJobResults(
       `[Agents] Failed to process results for job ${job.jobName}: ${err.message}`,
       "ERROR",
     );
+    logBatchError(job.jobName, `Failed to process results: ${err.message}`);
   }
 }
 

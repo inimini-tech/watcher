@@ -7,6 +7,7 @@ import { execSync } from "child_process";
 import { Storage } from "@google-cloud/storage";
 import { shortPath, log } from "./logging";
 import { startAgentsWatcher } from "./agents";
+import { waitForUploadSlot } from "./rate-limiter";
 
 let ps = false;
 
@@ -51,6 +52,7 @@ async function main() {
           }
 
           try {
+            await waitForUploadSlot();
             await uploadFileToBucket(event.path);
             await fetch(`${process.env.API_URL}/api/processed?id=${id}`);
           } catch (err) {
