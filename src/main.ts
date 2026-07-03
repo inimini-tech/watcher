@@ -16,6 +16,12 @@ const storage = new Storage({
   credentials: require("../key.json"),
 });
 
+// Tracks PNG files currently being processed so the event watcher and the
+// periodic sweep don't pick up the same file twice.
+const processingPngs = new Set<string>();
+
+const PNG_SWEEP_INTERVAL_MS = 30_000; // 30 seconds
+
 async function main() {
   log("Starting watcher", "NOTICE");
   checkFolder();
@@ -24,42 +30,86 @@ async function main() {
     startAgentsWatcher();
   }
 
+  // Live event watcher for low-latency handling of new PNGs.
   await watcher.subscribe(config.GARMENT_PS_WATCH_PATH, async (err, events) => {
+    if (err) {
+      log(`PNG watcher error: ${err.message}`, "ERROR");
+      return;
+    }
     for (let i = 0; i < events.length; i++) {
       const event = events[i];
-
       if (event.type === "create") {
-        ps = false;
-
-        await checkFileSize(event.path, async () => {
-          log(`File ${shortPath(event.path)} has been synced`);
-
-          const id = path.parse(path.posix.basename(event.path)).name;
-          const filename = path.posix
-            .basename(event.path)
-            .replace(".png", ".jpg");
-
-          const oldPath = path.join(config.GARMENT_PS_PROCESS_PATH, filename);
-          const newPath = path.join(config.GARMENT_OUT_PATH, filename);
-
-          if (fs.existsSync(oldPath)) {
-            try {
-              fs.renameSync(oldPath, newPath);
-            } catch (err: any) {
-              log(`Could not rename file`, "ERROR");
-              log(err.message, "ERROR");
-            }
-          }
-
-          try {
-            await waitForUploadSlot();
-            await uploadFileToBucket(event.path);
-            await fetch(`${process.env.API_URL}/api/processed?id=${id}`);
-          } catch (err) {
-            log(`Could not upload file to bucket`, "ERROR");
-          }
-        });
+        handlePngFile(event.path);
       }
+    }
+  });
+
+  // Fallback sweep: @parcel/watcher only reports events that happen while it is
+  // running, so it never sees files already in _PNG at startup and can miss
+  // events on Dropbox-synced folders. Scan for leftover PNGs on an interval.
+  scanPngFolder();
+  setInterval(scanPngFolder, PNG_SWEEP_INTERVAL_MS);
+}
+
+function scanPngFolder() {
+  let filenames: string[];
+  try {
+    filenames = fs.readdirSync(config.GARMENT_PS_WATCH_PATH);
+  } catch (err: any) {
+    log(`Could not read PNG watch folder: ${err.message}`, "ERROR");
+    return;
+  }
+
+  const pngFiles = filenames.filter(
+    (f) => !f.startsWith(".") && path.extname(f).toLowerCase() === ".png",
+  );
+
+  const pending = pngFiles.filter((f) => {
+    const filePath = path.join(config.GARMENT_PS_WATCH_PATH, f);
+    return !processingPngs.has(filePath);
+  });
+
+  if (pending.length > 0) {
+    log(`Sweep found ${pending.length} unprocessed PNG file(s) in _PNG`, "NOTICE");
+    for (const filename of pending) {
+      handlePngFile(path.join(config.GARMENT_PS_WATCH_PATH, filename));
+    }
+  }
+}
+
+function handlePngFile(filePath: string) {
+  if (processingPngs.has(filePath)) return;
+  processingPngs.add(filePath);
+  ps = false;
+
+  checkFileSize(filePath, async () => {
+    try {
+      log(`File ${shortPath(filePath)} has been synced`);
+
+      const id = path.parse(path.posix.basename(filePath)).name;
+      const filename = path.posix.basename(filePath).replace(".png", ".jpg");
+
+      const oldPath = path.join(config.GARMENT_PS_PROCESS_PATH, filename);
+      const newPath = path.join(config.GARMENT_OUT_PATH, filename);
+
+      if (fs.existsSync(oldPath)) {
+        try {
+          fs.renameSync(oldPath, newPath);
+        } catch (err: any) {
+          log(`Could not rename file`, "ERROR");
+          log(err.message, "ERROR");
+        }
+      }
+
+      try {
+        await waitForUploadSlot();
+        await uploadFileToBucket(filePath);
+        await fetch(`${process.env.API_URL}/api/processed?id=${id}`);
+      } catch (err) {
+        log(`Could not upload file to bucket`, "ERROR");
+      }
+    } finally {
+      processingPngs.delete(filePath);
     }
   });
 }
