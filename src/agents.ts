@@ -20,6 +20,16 @@ const DOWNLOAD_DELAY_MS = 15_000; // 15 seconds delay after job success
 const MAX_RETRIES = 3;
 const INITIAL_RETRY_DELAY_MS = 5_000; // 5 seconds, doubles each retry
 
+// Gemini Files API storage is capped at 20 GB per project and uploads do not
+// reliably expire on their own, so uploaded batch inputs must be deleted.
+const UPLOAD_NAME_PREFIX = "agents-batch-";
+const ORPHAN_SWEEP_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
+const ORPHAN_MIN_AGE_MS = 48 * 60 * 60 * 1000; // older than any live batch job
+
+// Back off submissions after a 429 instead of retrying every cycle
+const RATE_LIMIT_BACKOFF_BASE_MS = 15 * 60 * 1000; // 15 minutes, doubles per strike
+const RATE_LIMIT_BACKOFF_MAX_MS = 2 * 60 * 60 * 1000; // 2 hours
+
 // --- Types ---
 
 export interface ImageDimensions {
@@ -31,6 +41,7 @@ export interface BatchJobState {
   jobName: string;
   files: string[]; // original filenames
   fileDimensions: Record<string, ImageDimensions>; // original dimensions per file
+  inputFile?: string; // uploaded JSONL in the Gemini Files API, deleted when the job ends
   submittedAt: number;
   status: "pending" | "running" | "succeeded" | "failed";
 }
@@ -39,6 +50,9 @@ export interface BatchJobState {
 
 export const STATE_FILE = path.join(__dirname, "..", "agents-state.json");
 let pendingJobs: BatchJobState[] = [];
+let submitPausedUntil = 0;
+let rateLimitStrikes = 0;
+let lastOrphanSweep = 0;
 
 function loadState(): void {
   try {
@@ -146,6 +160,54 @@ async function retryWithBackoff<T>(
   throw lastError;
 }
 
+function isRateLimitError(err: any): boolean {
+  return (
+    err?.status === 429 ||
+    /\b429\b|RESOURCE_EXHAUSTED|Too Many Requests/i.test(String(err?.message ?? ""))
+  );
+}
+
+async function deleteUploadedFile(client: GoogleGenAI, name: string): Promise<void> {
+  try {
+    await client.files.delete({ name });
+    log(`[Agents] Deleted uploaded file ${name}`, "NOTICE");
+  } catch (err: any) {
+    // Not fatal: the orphan sweep will retry later
+    log(`[Agents] Failed to delete uploaded file ${name}: ${err.message}`, "WARNING");
+  }
+}
+
+// Safety net: delete batch uploads that no tracked job references, e.g. left
+// behind by a crash between upload and job creation, or by jobs submitted
+// before uploads were cleaned up.
+async function sweepOrphanedUploads(client: GoogleGenAI): Promise<void> {
+  const inUse = new Set(pendingJobs.map((j) => j.inputFile).filter(Boolean));
+  const cutoff = Date.now() - ORPHAN_MIN_AGE_MS;
+  let deleted = 0;
+
+  const pager = await client.files.list({ config: { pageSize: 100 } });
+  const orphans: string[] = [];
+  for await (const file of pager) {
+    if (!file.name || inUse.has(file.name)) continue;
+    if (!file.displayName?.startsWith(UPLOAD_NAME_PREFIX)) continue;
+    if (!file.createTime || Date.parse(file.createTime) > cutoff) continue;
+    orphans.push(file.name);
+  }
+
+  for (const name of orphans) {
+    try {
+      await client.files.delete({ name });
+      deleted++;
+    } catch (err: any) {
+      log(`[Agents] Orphan sweep could not delete ${name}: ${err.message}`, "WARNING");
+    }
+  }
+
+  if (orphans.length > 0) {
+    log(`[Agents] Orphan sweep deleted ${deleted}/${orphans.length} old upload(s)`, "NOTICE");
+  }
+}
+
 function chunkArray<T>(arr: T[], size: number): T[][] {
   const chunks: T[][] = [];
   for (let i = 0; i < arr.length; i += size) {
@@ -164,51 +226,51 @@ async function submitNewFiles(): Promise<void> {
 
   ensureDir(config.AGENTS_PROCESSING_PATH);
 
-  // Move files to processing folder
-  const movedFiles: string[] = [];
-  for (const filename of files) {
-    const src = path.join(config.AGENTS_WATCH_PATH, filename);
-    const dest = path.join(config.AGENTS_PROCESSING_PATH, filename);
-    try {
-      fs.renameSync(src, dest);
-      movedFiles.push(filename);
-      log(`[Agents] Moved ${shortPath(src)} → processing`, "NOTICE");
-    } catch (err: any) {
-      log(`[Agents] Failed to move ${filename}: ${err.message}`, "ERROR");
-    }
-  }
-
-  if (movedFiles.length === 0) return;
-
-  // Split into smaller batches
-  const batches = chunkArray(movedFiles, MAX_BATCH_SIZE);
+  // Split into smaller batches. Files are moved to processing one batch at a
+  // time, so a rate limit leaves the remaining files untouched in the watch folder.
+  const batches = chunkArray(files, MAX_BATCH_SIZE);
   log(
-    `[Agents] Splitting ${movedFiles.length} image(s) into ${batches.length} batch(es) of up to ${MAX_BATCH_SIZE}`,
+    `[Agents] Splitting ${files.length} image(s) into ${batches.length} batch(es) of up to ${MAX_BATCH_SIZE}`,
     "NOTICE",
   );
 
   for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
-    const batchFiles = batches[batchIndex];
+    const batchFiles: string[] = [];
+    for (const filename of batches[batchIndex]) {
+      const src = path.join(config.AGENTS_WATCH_PATH, filename);
+      const dest = path.join(config.AGENTS_PROCESSING_PATH, filename);
+      try {
+        fs.renameSync(src, dest);
+        batchFiles.push(filename);
+        log(`[Agents] Moved ${shortPath(src)} → processing`, "NOTICE");
+      } catch (err: any) {
+        log(`[Agents] Failed to move ${filename}: ${err.message}`, "ERROR");
+      }
+    }
+    if (batchFiles.length === 0) continue;
+
     try {
       await submitBatch(batchFiles, batchIndex + 1, batches.length);
+      rateLimitStrikes = 0;
     } catch (err: any) {
       log(
         `[Agents] Failed to submit batch ${batchIndex + 1}/${batches.length}: ${err.message}`,
         "ERROR",
       );
+      moveFilesBack(batchFiles);
 
-      // Move files back to watch folder on failure
-      for (const filename of batchFiles) {
-        const src = path.join(config.AGENTS_PROCESSING_PATH, filename);
-        const dest = path.join(config.AGENTS_WATCH_PATH, filename);
-        try {
-          if (fs.existsSync(src)) {
-            fs.renameSync(src, dest);
-            log(`[Agents] Moved ${filename} back to watch folder`, "WARNING");
-          }
-        } catch (moveErr: any) {
-          log(`[Agents] Failed to move ${filename} back: ${moveErr.message}`, "ERROR");
-        }
+      if (isRateLimitError(err)) {
+        const backoffMs = Math.min(
+          RATE_LIMIT_BACKOFF_BASE_MS * 2 ** rateLimitStrikes,
+          RATE_LIMIT_BACKOFF_MAX_MS,
+        );
+        rateLimitStrikes++;
+        submitPausedUntil = Date.now() + backoffMs;
+        log(
+          `[Agents] Rate limited by Gemini (strike ${rateLimitStrikes}). Pausing submissions for ${Math.round(backoffMs / 60_000)} min`,
+          "WARNING",
+        );
+        return;
       }
     }
   }
@@ -299,17 +361,23 @@ async function submitBatch(
 
   log(`[Agents] Uploaded file: ${uploadedFile.name}`, "NOTICE");
 
-  // Create batch job
-  const batchJob = await client.batches.create({
-    model: model,
-    src: uploadedFile.name,
-    config: {
-      displayName: `agents-upscale-${timestamp}-${batchNum}`,
-    },
-  });
-
-  if (!batchJob.name) {
-    throw new Error("Batch job created but no name returned");
+  // Create batch job. If this fails, delete the upload so it doesn't
+  // occupy Files API storage while the images wait to be retried.
+  let batchJob;
+  try {
+    batchJob = await client.batches.create({
+      model: model,
+      src: uploadedFile.name,
+      config: {
+        displayName: `agents-upscale-${timestamp}-${batchNum}`,
+      },
+    });
+    if (!batchJob.name) {
+      throw new Error("Batch job created but no name returned");
+    }
+  } catch (err) {
+    await deleteUploadedFile(client, uploadedFile.name);
+    throw err;
   }
 
   log(
@@ -324,6 +392,7 @@ async function submitBatch(
     jobName: batchJob.name,
     files: batchFiles,
     fileDimensions,
+    inputFile: uploadedFile.name,
     submittedAt: timestamp,
     status: "pending",
   };
@@ -352,12 +421,19 @@ async function checkPendingJobs(): Promise<void> {
   }
 
   // Remove completed/failed jobs from list (reverse to keep indices valid)
+  // and delete their uploaded input files
   if (jobsToRemove.length > 0) {
     jobsToRemove.sort((a, b) => b - a);
+    const finishedInputs: string[] = [];
     for (const idx of jobsToRemove) {
-      pendingJobs.splice(idx, 1);
+      const [job] = pendingJobs.splice(idx, 1);
+      if (job?.inputFile) finishedInputs.push(job.inputFile);
     }
     saveState();
+
+    for (const name of finishedInputs) {
+      await deleteUploadedFile(client, name);
+    }
   }
 }
 
@@ -403,10 +479,14 @@ async function checkSingleJob(
       // Move originals back to watch folder
       moveFilesBack(job.files);
       return index;
-    } else if (result.state === JobState.JOB_STATE_CANCELLED) {
+    } else if (
+      result.state === JobState.JOB_STATE_CANCELLED ||
+      result.state === JobState.JOB_STATE_EXPIRED
+    ) {
       job.status = "failed";
-      log(`[Agents] Batch job cancelled: ${job.jobName}`, "WARNING");
-      logBatchError(job.jobName, "Batch job cancelled");
+      const reason = result.state === JobState.JOB_STATE_EXPIRED ? "expired" : "cancelled";
+      log(`[Agents] Batch job ${reason}: ${job.jobName}`, "WARNING");
+      logBatchError(job.jobName, `Batch job ${reason}`);
 
       moveFilesBack(job.files);
       return index;
@@ -605,6 +685,21 @@ async function runAgentsCycle(): Promise<void> {
     await checkPendingJobs();
   } catch (err: any) {
     log(`[Agents] Error checking pending jobs: ${err.message}`, "ERROR");
+  }
+
+  if (Date.now() - lastOrphanSweep > ORPHAN_SWEEP_INTERVAL_MS) {
+    lastOrphanSweep = Date.now();
+    try {
+      await sweepOrphanedUploads(getClient());
+    } catch (err: any) {
+      log(`[Agents] Orphan sweep failed: ${err.message}`, "WARNING");
+    }
+  }
+
+  if (Date.now() < submitPausedUntil) {
+    const minutesLeft = Math.ceil((submitPausedUntil - Date.now()) / 60_000);
+    log(`[Agents] Submissions paused after rate limit, resuming in ~${minutesLeft} min`, "NOTICE");
+    return;
   }
 
   try {
